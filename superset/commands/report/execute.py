@@ -142,6 +142,7 @@ from superset.utils.report_execution import (
 )
 from superset.utils.screenshot_utils import (
     ChartHoldersNeverMountedError,
+    DashboardRenderCrashedError,
     validate_report_screenshot,
 )
 from superset.utils.screenshots import ChartScreenshot, DashboardScreenshot
@@ -1243,7 +1244,8 @@ class BaseReportState:
                     self._render_timeout_message(
                         tab_anchors[screenshot_index]
                         if screenshot_index < len(tab_anchors)
-                        else None
+                        else None,
+                        crashed=isinstance(ex, DashboardRenderCrashedError),
                     )
                 ) from ex
             raise ReportScheduleScreenshotFailedError(
@@ -1316,8 +1318,8 @@ class BaseReportState:
                 suffixes[index] = tab_info[1]
         return suffixes
 
-    def _render_timeout_message(self, anchor: str | None) -> str:
-        """Describe a bounded render timeout without Playwright internals."""
+    def _render_timeout_message(self, anchor: str | None, crashed: bool = False) -> str:
+        """Describe a bounded render failure without Playwright internals."""
         title: str | None = None
         if anchor:
             try:
@@ -1325,6 +1327,11 @@ class BaseReportState:
             except Exception:  # noqa: BLE001
                 title = None
         target = f'dashboard tab "{title}"' if title else "the dashboard"
+        if crashed:
+            return (
+                f"Failed to render {target}: the page reported an unexpected "
+                "error. Check that the dashboard loads in Superset and try again."
+            )
         return (
             f"Timed out waiting for {target} to finish rendering. "
             "Check that the content loads in the dashboard and try again."
