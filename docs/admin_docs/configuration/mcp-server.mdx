@@ -452,7 +452,8 @@ was saved or that a provider query executed successfully.
 ## Canvas authoring and recovery
 
 Canvas tools require the `CANVAS` feature flag and the caller's Canvas permissions.
-Agents change canvas content only through drafts. `create_canvas` always publishes
+Agents change canvas content only through drafts, including one-off fixes, and
+publish a draft only when the user explicitly asks. `create_canvas` always publishes
 an empty canvas; initial `ops` are applied to a draft of it, and the response
 carries that draft's `token`, `draft_url` and `draft_revision`. If an initial
 operation fails, neither the canvas nor the draft is retained. To change an
@@ -464,6 +465,19 @@ asks to publish. That is guidance to the model, not a permission check; set
 `MCP_CANVAS_AGENT_PUBLISH = False` to remove `commit_canvas_draft` and keep
 publishing in the UI. The instructions then tell agents to hand drafts to the
 user to publish.
+
+Each widget renders within the grid cell its layout gives it. A table keeps its
+cell's size and scrolls inside it, with its header row kept in view. Groups and
+tabs reserve one header row above their content, titled or not (a group shows
+its title there when one is set). Validation grows a nonempty container to its
+content's rows plus that row and pushes down whatever sits below it, so nested
+containers each add their own row. A container already taller than its content
+keeps its height.
+
+Series colors are optional. In the per-series `customize.series` styling of the
+`echarts` and `balloons` widgets, an empty `color` (the default) sets no
+explicit color and leaves the choice to the renderer. A color set explicitly is
+kept as authored, including for a series that is no longer part of the query.
 
 `get_canvas_data` returns the data behind a canvas's widgets in one call (title,
 row count, columns and up to `max_rows` rows per placement, in layout order),
