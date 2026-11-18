@@ -39,8 +39,12 @@ export type CanvasDefinitionState =
   | {
       status: 'complete';
       result: CanvasDefinitionResult;
+      /** The canvas `result` was read for. */
+      canvasId: number;
       /** The draft `result` was read from, if any. */
       draftToken?: string;
+      /** Set when the last refresh of this source failed. */
+      refreshFailed?: true;
     };
 
 const definitionEndpoint = (canvasId: number) =>
@@ -67,9 +71,15 @@ export function useCanvasDefinition(canvasId: number, draftToken?: string) {
   // Drops a response for a source the page has since moved off.
   const source = useRef<string>();
   source.current = `${canvasId}:${draftToken ?? ''}`;
+  // Requests in the order they were sent, and the newest one answered: an
+  // answer to an older request than that, success or failure, is stale.
+  const sent = useRef(0);
+  const answered = useRef(0);
 
   const load = useCallback(async () => {
     const requested = `${canvasId}:${draftToken ?? ''}`;
+    sent.current += 1;
+    const order = sent.current;
     try {
       const { json } = await SupersetClient.get(
         draftToken
@@ -79,17 +89,31 @@ export function useCanvasDefinition(canvasId: number, draftToken?: string) {
             }
           : { endpoint: definitionEndpoint(canvasId) },
       );
-      if (source.current !== requested) return;
+      if (source.current !== requested || order < answered.current) return;
+      answered.current = order;
+      // An older revision than the one on screen.
+      if (
+        revision.current !== undefined &&
+        json.result.revision < revision.current
+      ) {
+        return;
+      }
       revision.current = json.result.revision;
-      setState({ status: 'complete', result: json.result, draftToken });
+      setState({
+        status: 'complete',
+        result: json.result,
+        canvasId,
+        draftToken,
+      });
     } catch (response) {
       const error = await getClientErrorObject(response);
-      if (source.current !== requested) return;
+      if (source.current !== requested || order < answered.current) return;
+      answered.current = order;
       // Keep showing the last good definition if a refresh of the same
       // source fails; a draft that fails to open is an error.
       setState(previous =>
         previous.status === 'complete' && previous.draftToken === draftToken
-          ? previous
+          ? { ...previous, refreshFailed: true }
           : { status: 'error', error },
       );
     }

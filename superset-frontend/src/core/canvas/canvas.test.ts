@@ -61,3 +61,41 @@ test('active canvas changes fire only when something changed', () => {
   expect(canvas.getActiveCanvas()).toBeUndefined();
   subscription.dispose();
 });
+
+test('active canvas changes fire on the open draft and a version preview', () => {
+  const listener = jest.fn();
+  const subscription = canvas.onDidChangeActiveCanvas(listener);
+  const published = {
+    id: 1,
+    title: 'Exec overview',
+    revision: 2,
+    previewingVersion: false,
+  };
+  const inDraft = { ...published, draft: { token: 'tok-1', revision: 0 } };
+  const moved = { ...published, draft: { token: 'tok-1', revision: 1 } };
+  const other = { ...published, draft: { token: 'tok-2', revision: 1 } };
+  const previewing = { ...published, previewingVersion: true };
+
+  setActiveCanvas(undefined);
+  setActiveCanvas(published);
+  setActiveCanvas(inDraft);
+  // A fresh object with the same values, draft included, is no change.
+  setActiveCanvas({ ...inDraft, draft: { ...inDraft.draft } });
+  setActiveCanvas(moved);
+  setActiveCanvas(other);
+  setActiveCanvas(published);
+  setActiveCanvas(previewing);
+  setActiveCanvas({ ...previewing });
+  setActiveCanvas(published);
+
+  expect(listener.mock.calls).toEqual([
+    [published],
+    [inDraft],
+    [moved],
+    [other],
+    [published],
+    [previewing],
+    [published],
+  ]);
+  subscription.dispose();
+});

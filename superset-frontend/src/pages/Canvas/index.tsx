@@ -182,11 +182,35 @@ function CanvasContent({ id }: { id: number }) {
   const title = metadata.result?.title;
   const revision =
     state.status === 'complete' ? state.result.revision : undefined;
+  // What extensions are told about the open canvas. The body says it, since
+  // it knows whether a change to the draft is in flight; this is what the page
+  // knows. Nothing while the canvas loads or fails, or while what is held is
+  // still the previous canvas's, which it is for a render after the id
+  // changes. Nor for a draft of another canvas, whose revision would be
+  // labelled as this one's; re-reading the draft token when the router
+  // navigates is a separate matter.
+  const active =
+    title !== undefined &&
+    revision !== undefined &&
+    state.status === 'complete' &&
+    state.canvasId === id &&
+    (state.result.canvasId ?? id) === id &&
+    metadata.result?.id === id
+      ? {
+          title,
+          revision,
+          // The draft's own definition, not since failed to refresh: until
+          // then the screen isn't that draft.
+          draftLoaded:
+            Boolean(draft.token) &&
+            state.draftToken === draft.token &&
+            !state.refreshFailed,
+        }
+      : undefined;
+  const hasActive = active !== undefined;
   useEffect(() => {
-    if (title !== undefined && revision !== undefined) {
-      setActiveCanvas({ id, title, revision });
-    }
-  }, [id, title, revision]);
+    if (!hasActive) setActiveCanvas(undefined);
+  }, [hasActive]);
   useEffect(() => () => setActiveCanvas(undefined), [id]);
 
   if (draft.token && state.status === 'error') {
@@ -281,6 +305,7 @@ function CanvasContent({ id }: { id: number }) {
           isEmpty={isEmpty}
           toolbarSlot={toolbarSlot}
           versionUuid={preview?._version.version_uuid}
+          active={active}
         />
         <CanvasVersionHistory
           open={historyOpen}

@@ -29,6 +29,11 @@ export interface DraftHistory {
   redo: () => void;
   /** Whether a step is in flight. */
   busy: boolean;
+  /**
+   * Whether a step has moved the draft past what is on screen, which catches
+   * up once the refetch the step triggers lands.
+   */
+  settling?: boolean;
 }
 
 /**
@@ -53,6 +58,12 @@ export function useDraftHistory(
     canRedo: Boolean(fetched.canRedo),
   });
   const [busy, setBusy] = useState(false);
+  // The revision the last step produced, and the draft it was taken on: a
+  // step that answers after the user moved to another draft says nothing
+  // about that one, which counts its revisions from zero.
+  const [stepped, setStepped] = useState<{ token: string; revision: number }>();
+  const currentToken = useRef(token);
+  currentToken.current = token;
   // The revision this state describes. A write moves the draft on, which
   // makes a step available and discards anything undone -- the server says
   // so too, but not until something asks it.
@@ -85,7 +96,15 @@ export function useDraftHistory(
           headers: { [DRAFT_TOKEN_HEADER]: token },
           jsonPayload: { revision },
         });
+        // The user moved to another draft while the step was in flight: what
+        // it answered describes the draft they left.
+        if (currentToken.current !== token) return;
         const result = json?.result ?? {};
+        // Before `busy` clears, so the draft is never taken as settled at
+        // the revision the step started from.
+        if (typeof result.revision === 'number') {
+          setStepped({ token, revision: result.revision });
+        }
         setState({
           canUndo: Boolean(result.canUndo),
           canRedo: Boolean(result.canRedo),
@@ -114,5 +133,9 @@ export function useDraftHistory(
     undo: useCallback(() => step('undo'), [step]),
     redo: useCallback(() => step('redo'), [step]),
     busy,
+    settling:
+      stepped !== undefined &&
+      stepped.token === token &&
+      revision < stepped.revision,
   };
 }

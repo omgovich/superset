@@ -16,6 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+import { act } from 'react';
 import fetchMock from 'fetch-mock';
 import {
   fireEvent,
@@ -37,14 +38,17 @@ function Harness({
   revision,
   fetched,
   reload,
+  token = 'tok-123',
 }: {
   revision: number;
   fetched: { canUndo?: boolean; canRedo?: boolean };
   reload: () => void;
+  token?: string;
 }) {
-  const history = useDraftHistory('tok-123', revision, fetched, reload);
+  const history = useDraftHistory(token, revision, fetched, reload);
   return (
     <>
+      <output aria-label="Settling">{String(history.settling)}</output>
       <button type="button" onClick={history.undo} disabled={!history.canUndo}>
         Undo
       </button>
@@ -134,4 +138,85 @@ test('a failed step refetches, so the draft is not shown as something it is not'
   fireEvent.click(undo());
 
   await waitFor(() => expect(reload).toHaveBeenCalled());
+});
+
+const settling = () => screen.getByRole('status', { name: 'Settling' });
+
+test('a step is settling until the canvas reaches the revision it produced', async () => {
+  // The step answers before the refetch it triggers lands, so for a while the
+  // screen still shows the revision the step started from.
+  fetchMock.post(undoEndpoint, {
+    result: { revision: 4, canUndo: false, canRedo: true },
+  });
+  const { rerender, reload } = renderHarness({ canUndo: true });
+  expect(settling()).toHaveTextContent('false');
+
+  fireEvent.click(undo());
+
+  await waitFor(() => expect(reload).toHaveBeenCalled());
+  expect(settling()).toHaveTextContent('true');
+
+  rerender(
+    <Harness revision={4} fetched={{ canRedo: true }} reload={reload} />,
+  );
+
+  expect(settling()).toHaveTextContent('false');
+});
+
+test('a step on another draft is not waited for', async () => {
+  // The step answers only after the user has moved to another draft, which
+  // counts its revisions from zero and would otherwise wait for revision 9.
+  let answer: () => void = () => {};
+  const held = new Promise<Response>(resolve => {
+    answer = () =>
+      resolve(
+        new Response(
+          JSON.stringify({
+            result: { revision: 9, canUndo: true, canRedo: true },
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+  });
+  fetchMock.post(undoEndpoint, () => held);
+  const { rerender, reload } = renderHarness({ canUndo: true });
+
+  fireEvent.click(undo());
+  await waitFor(() => expect(fetchMock.callHistory.calls()).toHaveLength(1));
+
+  rerender(
+    <Harness revision={0} fetched={{}} reload={reload} token="tok-456" />,
+  );
+  await act(async () => {
+    answer();
+    await held;
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  expect(settling()).toHaveTextContent('false');
+  // Nor does what it answered about the old draft land on the new one.
+  expect(undo()).toBeDisabled();
+  expect(redo()).toBeDisabled();
+  expect(reload).not.toHaveBeenCalled();
+});
+
+test('a settled step on one draft does not hold up the next draft', async () => {
+  fetchMock.post(undoEndpoint, {
+    result: { revision: 4, canUndo: false, canRedo: true },
+  });
+  const { rerender, reload } = renderHarness({ canUndo: true });
+
+  fireEvent.click(undo());
+  await waitFor(() => expect(settling()).toHaveTextContent('true'));
+  rerender(
+    <Harness revision={4} fetched={{ canRedo: true }} reload={reload} />,
+  );
+  expect(settling()).toHaveTextContent('false');
+
+  // A new draft counts its revisions from zero, below the step's 4.
+  rerender(
+    <Harness revision={0} fetched={{}} reload={reload} token="tok-456" />,
+  );
+
+  expect(settling()).toHaveTextContent('false');
 });

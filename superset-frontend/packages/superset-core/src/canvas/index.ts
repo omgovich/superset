@@ -169,11 +169,54 @@ export interface CanvasWidgetProps {
   renderGrid: (options?: { chromeAbove?: boolean }) => ReactNode;
 }
 
-/** The canvas the user has open. */
+/** The draft of the active canvas that the user has on screen. */
+export interface ActiveCanvasDraft {
+  /**
+   * Authorizes reading, changing, publishing and discarding the draft as the
+   * current user. Treat it as a credential: don't log it or send it anywhere
+   * the user hasn't asked for.
+   */
+  readonly token: string;
+  /**
+   * The draft revision on screen, which is the one a publish must name.
+   * Drafts count their revisions from 0. If the draft has changed since, a
+   * publish naming this revision is rejected with a conflict. Don't retry
+   * with a newer revision the user hasn't seen; wait for the next value
+   * instead.
+   */
+  readonly revision: number;
+}
+
+/** The canvas the user has open. Values are frozen snapshots. */
 export interface ActiveCanvas {
-  id: number;
-  title: string;
-  revision: number;
+  readonly id: number;
+  readonly title: string;
+  /**
+   * Revision of the definition the page last loaded. While a draft's
+   * definition is on screen this is the draft's own, even when `draft` is
+   * absent (leaving it, a change settling, a failed refresh); a version
+   * preview doesn't change it. It counts in the draft's own revisions while
+   * a draft's definition is on screen, so a value without `draft` can still
+   * be a draft mid-change: don't infer the published canvas from a missing
+   * `draft`. In a draft it can trail `draft.revision`, which layout edits
+   * move on before the next load: only `draft.revision` is the one to
+   * publish.
+   */
+  readonly revision: number;
+  /**
+   * The draft on screen, once settled. Present only after the draft's own
+   * definition has loaded, and while no change to it is in flight: a layout
+   * write, an undo or redo still catching up, a publish or a discard. Absent
+   * whenever the published canvas or a version preview is shown, and after
+   * a refresh of the draft fails until one succeeds.
+   *
+   * So absence alone does not mean the user left the draft: it also goes
+   * away briefly during every such change, and comes back with the revision
+   * the change reached.
+   */
+  readonly draft?: ActiveCanvasDraft;
+  /** Whether a saved version is shown in place of the canvas. */
+  readonly previewingVersion?: boolean;
 }
 
 /**
@@ -201,6 +244,12 @@ export declare function getWidgetRenderer(
 export declare function getActiveCanvas(): ActiveCanvas | undefined;
 
 /**
- * Fires when the user opens or leaves a canvas, or the open canvas changes.
+ * Fires when the user opens or leaves a canvas, or the open canvas changes:
+ * entering or leaving a draft, a new draft revision on screen, a draft change
+ * starting or settling, and entering or leaving a version preview.
+ *
+ * `draft` goes away and comes back around every layout write, so a draft
+ * edited by hand fires this often. To tell a switch to another canvas apart,
+ * compare `id`.
  */
 export declare const onDidChangeActiveCanvas: Event<ActiveCanvas | undefined>;
